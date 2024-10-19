@@ -47,15 +47,21 @@ var upgrader = websocket.Upgrader{
 }
 
 func (h *Handler) JoinRoom(c *gin.Context) {
+	roomID := c.Param("roomId")
+	clientID := c.Query("userId")
+	username := c.Query("username")
+
+	_, exists := h.hub.Rooms[roomID]
+	if !exists {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Room not found"})
+		return
+	}
+
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-
-	roomID := c.Param("roomId")
-	clientID := c.Query("userId")
-	username := c.Query("username")
 
 	cl := &Client{
 		Conn:     conn,
@@ -72,6 +78,50 @@ func (h *Handler) JoinRoom(c *gin.Context) {
 	}
 
 	h.hub.Register <- cl
+	h.hub.Broadcast <- m
+
+	go cl.writeMessage()
+	cl.readMessage(h.hub)
+}
+
+func (h *Handler) ExitRoom(c *gin.Context) {
+	roomID := c.Param("roomId")
+	clientID := c.Query("userId")
+	username := c.Query("username")
+
+	room, exists := h.hub.Rooms[roomID]
+	if !exists {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Room not found"})
+		return
+	}
+
+	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	cl := &Client{
+		Conn:     conn,
+		Message:  make(chan *Message, 10),
+		ID:       clientID,
+		RoomID:   roomID,
+		Username: username,
+	}
+
+	m := &Message{
+		Content:  "A user has left the room",
+		RoomID:   roomID,
+		Username: username,
+	}
+
+	client, ok := room.Clients[clientID]
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Client not found in the room"})
+		return
+	}
+
+	h.hub.Unregister <- client
 	h.hub.Broadcast <- m
 
 	go cl.writeMessage()
