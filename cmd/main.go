@@ -2,6 +2,9 @@ package main
 
 import (
 	"chat-app/db"
+	"chat-app/internal/user"
+	"chat-app/internal/ws"
+	"chat-app/router"
 	"flag"
 	"fmt"
 	"log"
@@ -9,10 +12,21 @@ import (
 )
 
 func main() {
-	_, err := db.NewDatabase()
+	dbConn, err := db.NewDatabase()
 	if err != nil {
 		log.Fatalf("could not connect to Database :%s", err)
 	}
+
+	userRep := user.NewRepository(dbConn.GetDB())
+	userSvc := user.NewService(userRep)
+	userHandler := user.NewHandler(userSvc)
+
+	hub := ws.NewHub()
+	wsHandler := ws.NewHandler(hub)
+	go hub.Run()
+
+	router.InitRouter(userHandler, wsHandler)
+	router.Start("0.0.0.0:8080")
 
 	name := flag.String("name", "world", "The name to greet.")
 	flag.Parse()
